@@ -22,5 +22,13 @@ cleaned_content = st.session_state.get('dom_content', "")
 
 with st.expander("View DOM Content"):
     st.text_area("DOM Content", cleaned_content, height=400)
-    
+
+if "dom_content" in st.session_state:
+    parse_description = st.text_area("Parse Description", "Describe what to parse from the DOM content here.")
+
+    if st.button("Parse Content"):
+        if parse_description:
+            st.write("Parsing content...")
+            
+            dom_chunks = splite_dom_content(st.session_state.dom_content)
 
