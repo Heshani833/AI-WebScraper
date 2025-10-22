@@ -1,109 +1,111 @@
-import shutil
-import time
-import os
-import selenium.webdriver as webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium import webdriver
+from selenium.webdriver import Remote, ChromeOptions
+from selenium.webdriver.chromium.remote_connection import ChromiumRemoteConnection
+from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
-from webdriver_manager.chrome import ChromeDriverManager
+from dotenv import load_dotenv
+import os
+import time
 
-def scrape_website(website: str,
-                   chrome_driver_path: str | None = None,
-                   wait_for_css: str | None = None,
-                   timeout: int = 15,
-                   headless: bool = True) -> str:
+load_dotenv()
+
+SBR_WEBDRIVER = os.getenv("SBR_WEBDRIVER")
+
+
+def scrape_website(website):
     """
-    Return the HTML of `website`. If wait_for_css is provided, wait up to `timeout`
-    seconds for that CSS selector to be present before returning page_source.
+    Scrape a website using remote browser if configured, otherwise use local Chrome.
     """
-    if not website:
-        raise ValueError("website must be a non-empty URL")
-
-    options = webdriver.ChromeOptions()
-    if headless:
-        # modern chrome uses '--headless=new'; older chrome might use '--headless'
-        options.add_argument('--headless=new')
-        options.add_argument('--disable-gpu')
-
-    # Use webdriver-manager to automatically download and manage ChromeDriver
-    # or use the provided chrome_driver_path if specified
-    if chrome_driver_path:
-        driver_path = chrome_driver_path
-        # On Windows ensure the driver path points to a valid executable
-        if driver_path and not driver_path.lower().endswith('.exe'):
-            alt = f"{driver_path}.exe"
-            if os.path.exists(alt):
-                driver_path = alt
-        
-        if not os.path.exists(driver_path):
-            raise RuntimeError(f"chromedriver not found at: {driver_path}")
-        
-        driver = webdriver.Chrome(service=Service(driver_path), options=options)
-    else:
-        # Use webdriver-manager to automatically download and install the correct ChromeDriver
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    if SBR_WEBDRIVER:
+        print("Connecting to Remote Scraping Browser...")
+        try:
+            sbr_connection = ChromiumRemoteConnection(SBR_WEBDRIVER, "goog", "chrome")
+            with Remote(sbr_connection, options=ChromeOptions()) as driver:
+                driver.get(website)
+                print("Waiting for captcha to solve...")
+                solve_res = driver.execute(
+                    "executeCdpCommand",
+                    {
+                        "cmd": "Captcha.waitForSolve",
+                        "params": {"detectTimeout": 10000},
+                    },
+                )
+                print("Captcha solve status:", solve_res["value"]["status"])
+                print("Navigated! Scraping page content...")
+                html = driver.page_source
+                return html
+        except Exception as e:
+            print(f"Remote browser failed: {e}. Falling back to local Chrome...")
+    
+    print("Using local Chrome browser...")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    chrome_options.page_load_strategy = 'eager'
+    
+    driver = None
     try:
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(30)
+        driver.set_script_timeout(30)
         driver.get(website)
-        if wait_for_css:
-            WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.CSS_SELECTOR, wait_for_css)))
+        time.sleep(3)
+        html = driver.page_source
+        
+        if not html or len(html) < 100:
+            raise Exception("Retrieved HTML is too short or empty")
+        
+        return html
+        
+    except Exception as e:
+        error_msg = str(e)
+        if "timeout" in error_msg.lower():
+            raise Exception(f"Page took too long to load (>30s). Try a simpler website or increase timeout.")
+        elif "net::" in error_msg.lower():
+            raise Exception(f"Network error: Cannot reach {website}. Check your internet connection.")
         else:
-            # small pause to let JS run (prefer a specific wait_for_css)
-            time.sleep(2)
-        return driver.page_source
+            raise Exception(f"Failed to scrape website: {error_msg}")
     finally:
-        driver.quit()
-
-
-if __name__ == "__main__":
-    # Demo code: keep credentials out of source control; prefer env vars
-    import os, urllib.request
-
-    proxy = os.getenv("SCRAPER_PROXY")  # e.g. http://user:pass@host:port
-    handler = urllib.request.ProxyHandler({'http': proxy, 'https': proxy}) if proxy else None
-    opener = urllib.request.build_opener(handler) if handler else urllib.request.build_opener()
-    resp = opener.open('https://geo.brdtest.com/mygeo.json')
-    print(resp.read().decode('utf-8'))
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
 
 
 def extract_body_content(html_content):
-    soup = BeautifulSoup(html_content, 'html.parser')
+    soup = BeautifulSoup(html_content, "html.parser")
     body_content = soup.body
     if body_content:
         return str(body_content)
     return ""
 
-def clean_body_content(body_content):
-    soup = BeautifulSoup(body_content, 'html.parser')
 
-    for script_or_style in soup(['script', 'style']):
+def clean_body_content(body_content):
+    soup = BeautifulSoup(body_content, "html.parser")
+
+    for script_or_style in soup(["script", "style"]):
         script_or_style.extract()
 
-    cleaned_content = soup.get_text(separator='\n ')
-    cleaned_content = '\n '.join(
+    cleaned_content = soup.get_text(separator="\n")
+    cleaned_content = "\n".join(
         line.strip() for line in cleaned_content.splitlines() if line.strip()
     )
+
     return cleaned_content
 
+
 def split_dom_content(dom_content, max_length=6000):
-    return[
-        dom_content[i: i+max_length] for i in range(0, len(dom_content), max_length)
+    return [
+        dom_content[i : i + max_length] for i in range(0, len(dom_content), max_length)
     ]
 
 
-# Compatibility alias: earlier code (main.py) imports `splite_dom_content` (typo).
-# Provide the alias so importing the old name works.
-def splite_dom_content(dom_content, max_length=6000):
-    return split_dom_content(dom_content, max_length)
-
-
-# Explicitly set __all__ to help from x import * and clarify public API
-__all__ = [
-    'scrape_website',
-    'extract_body_content',
-    'clean_body_content',
-    'split_dom_content',
-    'splite_dom_content',
-]
-
+splite_dom_content = split_dom_content

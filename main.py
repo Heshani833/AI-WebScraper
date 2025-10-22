@@ -1,38 +1,39 @@
 import streamlit as st
-from scrape import scrape_website, splite_dom_content, extract_body_content, clean_body_content
-
+from scrape import (
+    scrape_website,
+    extract_body_content,
+    clean_body_content,
+    split_dom_content,
+)
 from parse import parse_with_ollama
 
 st.title("AI Web Scraper")
-url = st.text_input("Enter the URL of the website to scrape:")
-
-# Ensure a session state key exists so we always have a defined value to display
-if 'dom_content' not in st.session_state:
-    st.session_state['dom_content'] = ""
+url = st.text_input("Enter Website URL")
 
 if st.button("Scrape Website"):
-    st.write(f"Scraping {url}...")
+    if url:
+        st.write("Scraping the website...")
 
-    result = scrape_website(url)
-    body_content = extract_body_content(result)
-    cleaned_content = clean_body_content(body_content)
+        dom_content = scrape_website(url)
+        body_content = extract_body_content(dom_content)
+        cleaned_content = clean_body_content(body_content)
 
-    st.session_state.dom_content = cleaned_content
+        st.session_state.dom_content = cleaned_content
+        st.success("Website scraped successfully!")
 
-# Use the session-stored value (empty string if nothing scraped yet)
-cleaned_content = st.session_state.get('dom_content', "")
-
-with st.expander("View DOM Content"):
-    st.text_area("DOM Content", cleaned_content, height=400)
 
 if "dom_content" in st.session_state:
-    parse_description = st.text_area("Parse Description", "Describe what to parse from the DOM content here.")
+    with st.expander("View DOM Content"):
+        st.text_area("DOM Content", st.session_state.dom_content, height=300)
+
+
+if "dom_content" in st.session_state:
+    parse_description = st.text_area("Describe what you want to parse")
 
     if st.button("Parse Content"):
         if parse_description:
-            st.write("Parsing content...")
-            
-            dom_chunks = splite_dom_content(st.session_state.dom_content)
-            result = parse_with_ollama(dom_chunks, parse_description)
-            st.write(result)
+            st.write("Parsing the content...")
 
+            dom_chunks = split_dom_content(st.session_state.dom_content)
+            parsed_result = parse_with_ollama(dom_chunks, parse_description)
+            st.write(parsed_result)
