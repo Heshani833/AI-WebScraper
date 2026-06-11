@@ -56,7 +56,7 @@ def scrape_website(website):
         driver.set_page_load_timeout(30)
         driver.set_script_timeout(30)
         driver.get(website)
-        time.sleep(3)
+        time.sleep(1)
         html = driver.page_source
         
         if not html or len(html) < 100:
@@ -102,7 +102,7 @@ def clean_body_content(body_content):
     return cleaned_content
 
 
-def split_dom_content(dom_content, max_length=6000):
+def split_dom_content(dom_content, max_length=16000):
     return [
         dom_content[i : i + max_length] for i in range(0, len(dom_content), max_length)
     ]
